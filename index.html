@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice Day / Night Tracker</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#eef3ff;background:#101522}*{box-sizing:border-box}
+body{margin:0;background:#101522}.wrap{max-width:1000px;margin:auto;padding:16px}.card{background:#181f30;border:1px solid #303a50;border-radius:16px;padding:18px;margin-bottom:14px}
+h1{margin:0 0 5px;font-size:24px}.muted{color:#aab4c8}.voice{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.dot{width:12px;height:12px;border-radius:50%;background:#777}.dot.on{background:#55d98a;box-shadow:0 0 12px #55d98a}.dot.err{background:#ff6b6b}
+button{font:inherit;cursor:pointer}.toggle{border:1px solid #45516a;background:#263047;color:#fff;border-radius:10px;padding:10px 13px}
+.heard{background:#111827;border-radius:10px;padding:12px;margin:10px 0;min-height:44px}.prediction{font-size:20px;font-weight:900;min-height:32px}
+.elements{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:14px 0}.element{padding:12px 6px;border-radius:11px;border:2px solid #3b465e;background:#222b3e;color:white;font-weight:700}.element.selected{border-color:#80aaff;background:#304266}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.result{padding:14px;border:0;border-radius:11px;font-weight:900;font-size:18px}.day{background:#f2c84b;color:#25200d}.night{background:#6576d8;color:#fff}.result:disabled{opacity:.35}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:9px 7px;border-bottom:1px solid #303a50;text-align:right}th:first-child,td:first-child{text-align:left}.lead{font-weight:900}.daylead{color:#f2cf5a}.nightlead{color:#9ba9ff}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:center}.small{padding:7px 9px;border:1px solid #45516a;background:#263047;color:#fff;border-radius:8px}
+.help{line-height:1.5;font-size:14px}.warn{color:#ffd27d}
+@media(max-width:650px){.elements{grid-template-columns:repeat(2,1fr)}table{font-size:11px}th,td{padding:7px 3px}}
+</style></head>
+<body><div class="wrap">
+<div class="card">
+<h1>🎙️ Voice Day / Night Tracker</h1>
+<div class="muted">Say a pair to hear/see its current prediction, then say “day” or “night” — or say everything at once.</div>
+<div class="voice"><span id="dot" class="dot"></span><b id="vstate">Starting microphone…</b><button id="toggle" class="toggle">Stop listening</button></div>
+<div class="heard">Heard: <b id="heard">—</b></div>
+<div id="prediction" class="prediction">Waiting for a combination…</div>
+<div class="elements" id="elements"></div>
+<div class="actions"><button id="day" class="result day" disabled>☀️ DAY</button><button id="night" class="result night" disabled>🌙 NIGHT</button></div>
+</div>
+<div class="card help">
+<b>Fast voice commands</b><br>
+“snow wind” → shows the current prediction.<br>
+“night” → records Night for the selected pair.<br>
+“snow wind day” → selects and records in one command.<br>
+<span class="warn">Tip: pause briefly between rounds so one result is not heard twice.</span>
+</div>
+<div class="card">
+<div class="top"><div><b>Live combinations</b> <span class="muted" id="rounds"></span></div><button id="reset" class="small">Reset session</button></div>
+<table><thead><tr><th>Combination</th><th>Day</th><th>Night</th><th>P(Day)</th><th>P(Night)</th><th>Prediction</th></tr></thead><tbody id="body"></tbody></table>
+</div></div>
+<script>
+const names=["Snow","Water","Wind","Lightning","Cloud"], lower=names.map(x=>x.toLowerCase());
+const icons={Snow:"❄️",Water:"💧",Wind:"💨",Lightning:"⚡",Cloud:"☁️"};
+let selected=[],data={},rounds=0,listening=true,lastFinal="",lastFinalAt=0;
+const E=id=>document.getElementById(id), box=E("elements"), day=E("day"), night=E("night");
+names.forEach(n=>{let b=document.createElement("button");b.className="element";b.textContent=icons[n]+" "+n;b.dataset.n=n;b.onclick=()=>selectToggle(n);box.appendChild(b)});
+function keyFor(a){return [...a].sort((x,y)=>names.indexOf(x)-names.indexOf(y)).join(" + ")}
+function setSelected(arr){selected=[...arr];document.querySelectorAll(".element").forEach(b=>b.classList.toggle("selected",selected.includes(b.dataset.n)));updatePrediction()}
+function selectToggle(n){let a=[...selected];if(a.includes(n))a=a.filter(x=>x!==n);else if(a.length<2)a.push(n);setSelected(a)}
+function updatePrediction(){
+ const ok=selected.length===2;day.disabled=night.disabled=!ok;
+ if(!ok){E("prediction").textContent=selected.length?"Select/say one more element.":"Waiting for a combination…";return}
+ const k=keyFor(selected),d=data[k]||{day:0,night:0},t=d.day+d.night;
+ if(!t)E("prediction").textContent=k+" → No observations yet";
+ else{let pd=100*d.day/t,pn=100*d.night/t;E("prediction").textContent=k+" → "+(pd>pn?`DAY ${pd.toFixed(1)}%`:pn>pd?`NIGHT ${pn.toFixed(1)}%`:"TIED 50.0%")+` (${d.day}D / ${d.night}N)`}
+}
+function record(r){
+ if(selected.length!==2)return;
+ const k=keyFor(selected);if(!data[k])data[k]={day:0,night:0};data[k][r]++;rounds++;render();
+ const d=data[k],t=d.day+d.night,pd=100*d.day/t,pn=100*d.night/t;
+ E("prediction").textContent=`Recorded ${r.toUpperCase()}: ${k} → `+(pd>pn?`DAY ${pd.toFixed(1)}%`:pn>pd?`NIGHT ${pn.toFixed(1)}%`:"TIED 50.0%")+` (${d.day}D / ${d.night}N)`;
+ setTimeout(()=>setSelected([]),500);
+}
+day.onclick=()=>record("day");night.onclick=()=>record("night");
+function render(){
+ E("rounds").textContent=`— ${rounds} rounds`;let b=E("body");b.innerHTML="";
+ let es=Object.entries(data).sort((a,z)=>(z[1].day+z[1].night)-(a[1].day+a[1].night));
+ if(!es.length){b.innerHTML='<tr><td colspan="6" style="text-align:center;color:#aab4c8;padding:22px">No results yet.</td></tr>';return}
+ for(const[k,d]of es){let t=d.day+d.night,pd=100*d.day/t,pn=100*d.night/t,p=pd>pn?`DAY ${pd.toFixed(1)}%`:pn>pd?`NIGHT ${pn.toFixed(1)}%`:"TIED",c=pd>pn?"daylead":pn>pd?"nightlead":"";
+ b.insertAdjacentHTML("beforeend",`<tr><td>${k}</td><td>${d.day}</td><td>${d.night}</td><td>${pd.toFixed(1)}%</td><td>${pn.toFixed(1)}%</td><td class="lead ${c}">${p}</td></tr>`)}
+}
+function parseVoice(txt){
+ let s=txt.toLowerCase().replace(/[^\w\s]/g," "), found=[];
+ for(let i=0;i<lower.length;i++)if(new RegExp("\\b"+lower[i]+"\\b").test(s))found.push(names[i]);
+ // common speech-recognition variants
+ if(/\blightning\b|\blightening\b|\blighting\b/.test(s)&&!found.includes("Lightning"))found.push("Lightning");
+ if(/\bwind\b|\bwindy\b/.test(s)&&!found.includes("Wind"))found.push("Wind");
+ found=[...new Set(found)].slice(0,2);
+ let r=/\bday\b/.test(s)?"day":/\bnight\b/.test(s)?"night":null;
+ if(found.length===2){setSelected(found); if(r)setTimeout(()=>record(r),80)}
+ else if(r&&selected.length===2)record(r);
+ else if(found.length===1)setSelected(found);
+}
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null;
+function start(){
+ if(!SR){E("vstate").textContent="Speech recognition is not supported here. Use Chrome or Edge.";E("dot").className="dot err";E("toggle").disabled=true;return}
+ rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang="en-GB";
+ rec.onstart=()=>{E("vstate").textContent="Listening continuously";E("dot").className="dot on"};
+ rec.onresult=e=>{
+   let interim="";
+   for(let i=e.resultIndex;i<e.results.length;i++){
+     let txt=e.results[i][0].transcript.trim();
+     if(e.results[i].isFinal){
+       E("heard").textContent=txt;
+       const now=Date.now(),norm=txt.toLowerCase().trim();
+       if(!(norm===lastFinal && now-lastFinalAt<1500)){lastFinal=norm;lastFinalAt=now;parseVoice(txt)}
+     } else interim+=txt+" ";
+   }
+   if(interim.trim())E("heard").textContent=interim.trim()+" …";
+ };
+ rec.onerror=e=>{if(e.error!=="aborted"){E("vstate").textContent="Mic issue: "+e.error;E("dot").className="dot err"}};
+ rec.onend=()=>{if(listening)setTimeout(()=>{try{rec.start()}catch(e){}},250)};
+ try{rec.start()}catch(e){}
+}
+E("toggle").onclick=()=>{listening=!listening;if(listening){E("toggle").textContent="Stop listening";start()}else{E("toggle").textContent="Start listening";E("vstate").textContent="Listening stopped";E("dot").className="dot";if(rec)try{rec.abort()}catch(e){}}};
+E("reset").onclick=()=>{if(confirm("Clear all tallies?")){data={};rounds=0;setSelected([]);render()}};
+render();start();
+</script></body></html>
